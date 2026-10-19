@@ -403,9 +403,9 @@ clear
 latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep tag_name | sed -E 's/.*"v(.*)".*/\1/' | head -n 1)"
 if [ -z "$latest_version" ]; then
     # NOTE(port): API GitHub kadang rate-limit (60 req/jam/IP) -> install versi terbaru tanpa pin
-    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 else
-    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version $latest_version
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version $latest_version
 fi
  
     # // Ambil Config Server
