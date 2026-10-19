@@ -132,7 +132,7 @@ fi
 echo -e "\e[32mloading...\e[0m"
 clear
 # REPO    
-    REPO="https://raw.githubusercontent.com/hayanart/wiz4rd-v2/main/"
+    REPO="https://raw.githubusercontent.com/hayanart/YuechanVpn/main/"
 
 ####
 start=$(date +%s)
@@ -406,6 +406,9 @@ if [ -z "$latest_version" ]; then
 else
     bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install --version $latest_version
 fi
+    # Symlink: official installer uses /usr/local/etc/xray/, script uses /etc/xray/
+    mkdir -p /usr/local/etc/xray
+    ln -sf /etc/xray/config.json /usr/local/etc/xray/config.json
  
     # // Ambil Config Server
     wget -O /etc/xray/config.json "${REPO}limit/config.json" >/dev/null 2>&1
