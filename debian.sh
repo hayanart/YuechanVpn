@@ -1,4 +1,9 @@
 #!/bin/bash
+# Non-interactive: cegah installer berhenti di prompt dpkg/debconf
+# (mis. konflik sshd_config saat apt upgrade). Selalu pakai konfigurasi lama.
+export DEBIAN_FRONTEND=noninteractive
+mkdir -p /etc/apt/apt.conf.d
+echo 'Dpkg::Options { "--force-confdef"; "--force-confold"; }' > /etc/apt/apt.conf.d/80-force-confold
 ### Color
 apt update -y
 apt install curl -y
@@ -289,7 +294,10 @@ read -p "   Please select numbers 1-2 or Any Button(Random) : " host
 echo ""
 if [[ $host == "1" ]]; then
 echo -e "   \e[1;32mPlease Enter Your Subdomain $NC"
+host1=""
+while [[ -z "$host1" ]]; do
 read -p "   Subdomain: " host1
+done
 echo "IP=" >> /var/lib/kyt/ipvps.conf
 echo $host1 > /etc/xray/domain
 echo $host1 > /root/domain
@@ -302,6 +310,20 @@ clear
 else
 print_install "Random Subdomain/Domain is Used"
 clear
+    fi
+    # Validasi domain: tidak boleh kosong. Jika masih kosong (mis. input
+    # tidak sengaja kosong), fallback ke domain random via cf.sh.
+    # Kalau tetap gagal, batalkan instalasi dengan pesan yang jelas.
+    if [[ ! -s /etc/xray/domain ]]; then
+        print_install "Domain kosong - memakai Domain Random"
+        wget ${REPO}limit/cf.sh && chmod +x cf.sh && ./cf.sh
+        rm -f /root/cf.sh cf.sh
+        clear
+    fi
+    if [[ ! -s /etc/xray/domain ]]; then
+        print_error "Domain"
+        echo "  Gagal mendapatkan domain. Instalasi dibatalkan."
+        exit 1
     fi
 }
 
@@ -346,7 +368,11 @@ print_install "Memasang SSL Pada Domain"
     /root/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
     ~/.acme.sh/acme.sh --installcert -d $domain --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc
     chmod 777 /etc/xray/xray.key
-    print_success "SSL Certificate"
+    if [[ -s /etc/xray/xray.crt && -s /etc/xray/xray.key ]]; then
+        print_success "SSL Certificate"
+    else
+        print_error "SSL Certificate (GAGAL - cek DNS domain mengarah ke IP VPS ini & koneksi internet)"
+    fi
 }
 
 function make_folder_xray() {
@@ -431,7 +457,13 @@ fi
     sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
     curl ${REPO}limit/nginx.conf > /etc/nginx/nginx.conf
     
-cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem
+# Susun hap.pem HANYA bila sertifikat SSL benar-benar ada.
+# hap.pem kosong/rusak membuat HAProxy gagal start.
+if [[ -s /etc/xray/xray.crt && -s /etc/xray/xray.key ]]; then
+cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem >/dev/null 2>&1
+else
+print_error "HAProxy Certificate (SSL belum terpasang)"
+fi
 
     # > Set Permission
     chmod +x /etc/systemd/system/runn.service
@@ -458,6 +490,12 @@ LimitNOFILE=1000000
 WantedBy=multi-user.target
 
 EOF
+    # Fix izin log: installer resmi Xray meng-set /var/log/xray milik user 'xray',
+    # sedangkan service ini berjalan sebagai www-data -> permission denied bila tidak dibetulkan.
+    mkdir -p /var/log/xray
+    chown -R www-data:www-data /var/log/xray
+    touch /var/log/xray/access.log /var/log/xray/error.log
+    chown www-data:www-data /var/log/xray/access.log /var/log/xray/error.log
 print_success "Konfigurasi Packet"
 }
 
@@ -848,6 +886,12 @@ systemctl restart haproxy
     systemctl enable --now rc-local
     systemctl enable --now dropbear
     systemctl enable --now openvpn
+    # OpenVPN versi baru (Ubuntu 22.04+/Debian 12+) memakai unit openvpn-server@ dengan
+    # config di /etc/openvpn/server/ (server-tcp.conf / server-udp.conf).
+    if [[ -f /lib/systemd/system/openvpn-server@.service || -f /etc/systemd/system/openvpn-server@.service ]]; then
+        systemctl enable --now openvpn-server@server-tcp 2>/dev/null || true
+        systemctl enable --now openvpn-server@server-udp 2>/dev/null || true
+    fi
     systemctl enable --now cron
     systemctl enable --now haproxy
     systemctl enable --now netfilter-persistent
