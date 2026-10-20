@@ -159,6 +159,23 @@ function print_error() {
     echo -e "${ERROR} ${REDBG} $1 ${FONT}"
 }
 
+# // Download terverifikasi: unduh ke file sementara, cek tidak kosong,
+# // baru pindahkan ke tujuan. Download yang gagal/terputus tidak lagi
+# // menyisakan file 0-byte yang merusak service secara diam-diam.
+function dl() {
+    local url="$1" dest="$2" i
+    for i in 1 2 3; do
+        if curl -fsL --connect-timeout 20 -o "${dest}.tmpdl" "$url" && [[ -s "${dest}.tmpdl" ]]; then
+            mv "${dest}.tmpdl" "$dest"
+            return 0
+        fi
+        sleep 2
+    done
+    rm -f "${dest}.tmpdl"
+    print_error "DOWNLOAD GAGAL: $url"
+    return 1
+}
+
 function print_success() {
     if [[ 0 -eq $? ]]; then
 		echo -e "${green} =============================== ${FONT}"
@@ -430,9 +447,9 @@ fi
     ln -sf /etc/xray/config.json /usr/local/etc/xray/config.json
  
     # // Ambil Config Server
-    wget -O /etc/xray/config.json "${REPO}limit/config.json" >/dev/null 2>&1
+    dl "${REPO}limit/config.json" /etc/xray/config.json
     #wget -O /usr/local/bin/xray "${REPO}xray/xray.linux.64bit" >/dev/null 2>&1
-    wget -O /etc/systemd/system/runn.service "${REPO}limit/runn.service" >/dev/null 2>&1
+    dl "${REPO}limit/runn.service" /etc/systemd/system/runn.service
     #chmod +x /usr/local/bin/xray
     domain=$(cat /etc/xray/domain)
     IPVS=$(cat /etc/xray/ipvps)
@@ -443,8 +460,8 @@ fi
     curl -s ipinfo.io/city >>/etc/xray/city
     curl -s ipinfo.io/org | cut -d " " -f 2-10 >>/etc/xray/isp
     print_install "Memasang Konfigurasi Packet"
-    wget -O /etc/haproxy/haproxy.cfg "${REPO}limit/haproxy.cfg" >/dev/null 2>&1
-    wget -O /etc/nginx/conf.d/xray.conf "${REPO}limit/xray.conf" >/dev/null 2>&1
+    dl "${REPO}limit/haproxy.cfg" /etc/haproxy/haproxy.cfg
+    dl "${REPO}limit/xray.conf" /etc/nginx/conf.d/xray.conf
     sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
     sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
     curl ${REPO}limit/nginx.conf > /etc/nginx/nginx.conf
@@ -502,7 +519,7 @@ print_success "Konfigurasi Packet"
 function ssh(){
 clear
 print_install "Memasang Password SSH"
-    wget -O /etc/pam.d/common-password "${REPO}limit/password"
+    dl "${REPO}limit/password" /etc/pam.d/common-password
 chmod +x /etc/pam.d/common-password
 
     DEBIAN_FRONTEND=noninteractive dpkg-reconfigure keyboard-configuration
@@ -578,7 +595,7 @@ print_install "Memasang Service Limit Quota"
 wget ${REPO}limit/limit.sh && chmod +x limit.sh && ./limit.sh
 
 cd
-wget -q -O /usr/bin/limit-ip "${REPO}limit/limit-ip"
+dl "${REPO}limit/limit-ip" /usr/bin/limit-ip
 chmod +x /usr/bin/*
 cd /usr/bin
 sed -i 's/\r//' limit-ip
@@ -640,11 +657,11 @@ systemctl enable trip
 #SERVICE VMESS
 # // Installing UDP Mini
 mkdir -p /usr/local/kyt/
-wget -q -O /usr/local/kyt/udp-mini "${REPO}limit/udp-mini"
+dl "${REPO}limit/udp-mini" /usr/local/kyt/udp-mini
 chmod +x /usr/local/kyt/udp-mini
-wget -q -O /etc/systemd/system/udp-mini-1.service "${REPO}limit/udp-mini-1.service"
-wget -q -O /etc/systemd/system/udp-mini-2.service "${REPO}limit/udp-mini-2.service"
-wget -q -O /etc/systemd/system/udp-mini-3.service "${REPO}limit/udp-mini-3.service"
+dl "${REPO}limit/udp-mini-1.service" /etc/systemd/system/udp-mini-1.service
+dl "${REPO}limit/udp-mini-2.service" /etc/systemd/system/udp-mini-2.service
+dl "${REPO}limit/udp-mini-3.service" /etc/systemd/system/udp-mini-3.service
 systemctl disable udp-mini-1
 systemctl stop udp-mini-1
 systemctl enable udp-mini-1
@@ -664,7 +681,7 @@ function ssh_slow(){
 clear
 # // Installing UDP Mini
 print_install "Memasang modul SlowDNS Server"
-    wget -q -O /tmp/nameserver "${REPO}limit/nameserver" >/dev/null 2>&1
+    dl "${REPO}limit/nameserver" /tmp/nameserver
     if [ -s /tmp/nameserver ]; then
         chmod +x /tmp/nameserver
         bash /tmp/nameserver | tee /root/install.log
@@ -678,7 +695,7 @@ clear
 function ins_SSHD(){
 clear
 print_install "Memasang SSHD"
-wget -q -O /etc/ssh/sshd_config "${REPO}limit/sshd" >/dev/null 2>&1
+dl "${REPO}limit/sshd" /etc/ssh/sshd_config
 chmod 700 /etc/ssh/sshd_config
 /etc/init.d/ssh restart
 systemctl restart ssh
@@ -691,8 +708,12 @@ function ins_dropbear(){
 clear
 print_install "Menginstall Dropbear"
 # // Installing Dropbear
-apt-get install dropbear -y > /dev/null 2>&1
-wget -q -O /etc/default/dropbear "${REPO}limit/dropbear.conf"
+apt-get install dropbear -y
+# Verifikasi dropbear benar-benar terpasang; ulangi sekali bila gagal
+if [[ ! -x /usr/sbin/dropbear ]]; then
+    apt-get install dropbear -y
+fi
+dl "${REPO}limit/dropbear.conf" /etc/default/dropbear
 chmod +x /etc/default/dropbear
 /etc/init.d/dropbear restart
 /etc/init.d/dropbear status
@@ -732,7 +753,7 @@ function ins_openvpn(){
 clear
 print_install "Menginstall OpenVPN"
 #OpenVPN
-wget ${REPO}limit/openvpn &&  chmod +x openvpn && ./openvpn
+dl "${REPO}limit/openvpn" openvpn &&  chmod +x openvpn && ./openvpn
 /etc/init.d/openvpn restart
 print_success "OpenVPN"
 }
@@ -743,7 +764,7 @@ print_install "Memasang Backup Server"
 #BackupOption
 apt install rclone -y
 printf "q\n" | rclone config
-wget -O /root/.config/rclone/rclone.conf "${REPO}limit/rclone.conf"
+dl "${REPO}limit/rclone.conf" /root/.config/rclone/rclone.conf
 #Install Wondershaper
 cd /bin
 git clone  https://github.com/magnific0/wondershaper.git
@@ -769,7 +790,7 @@ password jokerman77
 logfile ~/.msmtp.log
 EOF
 chown -R www-data:www-data /etc/msmtprc
-wget -q -O /etc/ipserver "${REPO}limit/ipserver" && bash /etc/ipserver
+dl "${REPO}limit/ipserver" /etc/ipserver && bash /etc/ipserver
 print_success "Backup Server"
 }
 
@@ -823,16 +844,16 @@ echo "Banner /etc/kyt.txt" >>/etc/ssh/sshd_config
 sed -i 's@DROPBEAR_BANNER=""@DROPBEAR_BANNER="/etc/kyt.txt"@g' /etc/default/dropbear
 
 # Ganti Banner
-wget -O /etc/kyt.txt "${REPO}limit/issue.net"
+dl "${REPO}limit/issue.net" /etc/kyt.txt
 print_success "Fail2ban"
 }
 
 function ins_epro(){
 clear
 print_install "Menginstall ePro WebSocket Proxy"
-    wget -O /usr/bin/ws "${REPO}limit/ws" >/dev/null 2>&1
-    wget -O /usr/bin/tun.conf "${REPO}limit/tun.conf" >/dev/null 2>&1
-    wget -O /etc/systemd/system/ws.service "${REPO}limit/ws.service" >/dev/null 2>&1
+    dl "${REPO}limit/ws" /usr/bin/ws
+    dl "${REPO}limit/tun.conf" /usr/bin/tun.conf
+    dl "${REPO}limit/ws.service" /etc/systemd/system/ws.service
     chmod +x /etc/systemd/system/ws.service
     chmod +x /usr/bin/ws
     chmod 644 /usr/bin/tun.conf
@@ -841,9 +862,9 @@ systemctl stop ws
 systemctl enable ws
 systemctl start ws
 systemctl restart ws
-wget -q -O /usr/local/share/xray/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" >/dev/null 2>&1
-wget -q -O /usr/local/share/xray/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" >/dev/null 2>&1
-wget -O /usr/sbin/ftvpn "${REPO}limit/ftvpn" >/dev/null 2>&1
+dl "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" /usr/local/share/xray/geosite.dat
+dl "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" /usr/local/share/xray/geoip.dat
+dl "${REPO}limit/ftvpn" /usr/sbin/ftvpn
 chmod +x /usr/sbin/ftvpn
 iptables -A FORWARD -m string --string "get_peers" --algo bm -j DROP
 iptables -A FORWARD -m string --string "announce_peer" --algo bm -j DROP
@@ -911,7 +932,7 @@ print_success "All Packet"
 function menu(){
     clear
     print_install "Memasang Menu Packet"
-    wget ${REPO}limit/menu.zip
+    dl "${REPO}limit/menu.zip" menu.zip
     unzip menu.zip
     chmod +x menu/*
     mv menu/* /usr/local/sbin
